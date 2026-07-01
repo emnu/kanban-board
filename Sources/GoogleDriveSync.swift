@@ -32,13 +32,16 @@ public class GoogleDriveSync: ObservableObject {
         }
     }
     
+    public static let defaultClientId = "673711859742-5p9du971aqiibaoo34o4ng8emjvkqoqe.apps.googleusercontent.com"
+    
     public var redirectUri: String {
         return "com.kanbanapp.oauth:/oauth2redirect"
     }
     
     public var clientId: String {
         get {
-            KeychainHelper.shared.readString(service: serviceName, account: accountClientId) ?? ""
+            let saved = KeychainHelper.shared.readString(service: serviceName, account: accountClientId) ?? ""
+            return saved.isEmpty ? GoogleDriveSync.defaultClientId : saved
         }
         set {
             if newValue.isEmpty {
