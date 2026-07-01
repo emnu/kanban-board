@@ -1,0 +1,17 @@
+# OS X
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspective3
+*.xcuserstate
+project.xcworkspace/
+xcuserdata/
+Objective-C/
+
+# XcodeGen
+Kanban.xcodeproj/
