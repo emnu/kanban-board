@@ -78,6 +78,15 @@ struct SettingsView: View {
                                     syncEngine.clientId = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                                 }
                             
+                            Button(role: .destructive) {
+                                syncEngine.disconnect()
+                                _ = KeychainHelper.shared.delete(service: "com.kanbanapp.googledrive", account: "clientId")
+                                clientIdInput = GoogleDriveSync.defaultClientId
+                            } label: {
+                                Label("Clear Stale Keychain Credentials", systemImage: "key.fill")
+                            }
+                            .buttonStyle(.bordered)
+                            
                             Divider().padding(.vertical, 4)
                             
                             VStack(alignment: .leading, spacing: 6) {
