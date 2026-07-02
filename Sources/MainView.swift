@@ -8,12 +8,15 @@ struct MainView: View {
     @State private var showingAddBoardAlert = false
     @State private var newBoardName = ""
     @State private var searchText = ""
+    @State private var showingRenameBoardSheet = false
+    @State private var boardToRename: Board? = nil
+    @State private var renameBoardNameInput = ""
     
     var body: some View {
         NavigationSplitView {
             // Sidebar: List of Boards
             List(selection: $store.activeBoard) {
-                Section("My Boards") {
+                Section {
                     ForEach(store.kanbanData.boards) { board in
                         NavigationLink(value: board) {
                             Label(board.name, systemImage: "folder")
@@ -27,6 +30,16 @@ struct MainView: View {
                                 }
                         }
                         .contextMenu {
+                            Button {
+                                boardToRename = board
+                                renameBoardNameInput = board.name
+                                showingRenameBoardSheet = true
+                            } label: {
+                                Label("Rename Board", systemImage: "pencil")
+                            }
+                            
+                            Divider()
+                            
                             Button(role: .destructive) {
                                 store.deleteBoard(board)
                             } label: {
@@ -34,6 +47,21 @@ struct MainView: View {
                             }
                             .disabled(store.kanbanData.boards.count <= 1)
                         }
+                    }
+                } header: {
+                    HStack {
+                        Text("My Boards")
+                        Spacer()
+                        Button(action: {
+                            newBoardName = ""
+                            showingAddBoardAlert = true
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Create New Board")
                     }
                 }
             }
@@ -58,18 +86,6 @@ struct MainView: View {
                         .help("Google Drive Connection Settings")
                         
                         Spacer()
-                        
-                        // Add Board Button
-                        Button(action: {
-                            newBoardName = ""
-                            showingAddBoardAlert = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 16))
-                                .foregroundColor(.accentColor)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Create New Board")
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -149,6 +165,41 @@ struct MainView: View {
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(newBoardName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding()
+            .frame(width: 300)
+        }
+        .sheet(isPresented: $showingRenameBoardSheet) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Rename Board")
+                    .font(.headline)
+                
+                TextField("Board Name", text: $renameBoardNameInput)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        if let board = boardToRename, !renameBoardNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            store.renameBoard(board.id, to: renameBoardNameInput)
+                            showingRenameBoardSheet = false
+                        }
+                    }
+                
+                HStack {
+                    Spacer()
+                    Button("Cancel") {
+                        showingRenameBoardSheet = false
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    
+                    Button("Save") {
+                        if let board = boardToRename, !renameBoardNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            store.renameBoard(board.id, to: renameBoardNameInput)
+                            showingRenameBoardSheet = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(renameBoardNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .padding()

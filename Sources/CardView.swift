@@ -30,121 +30,136 @@ struct CardView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Task Header (Title + Icons)
-            HStack(alignment: .top) {
-                Text(task.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                HStack(spacing: 6) {
-                    // Show due date indicator if overdue or pending
-                    if task.dueDate != nil {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 11))
-                            .foregroundColor(isOverdue ? .red : .secondary)
-                    }
+        HStack(spacing: 0) {
+            // Left color indicator strip (Jira/Outlook style)
+            if task.isFlagged {
+                Rectangle()
+                    .fill(Color.red)
+                    .frame(width: 4)
+            } else if let firstTag = task.tags.first {
+                Rectangle()
+                    .fill(tagColor(firstTag))
+                    .frame(width: 4)
+            }
+            
+            VStack(alignment: .leading, spacing: 8) {
+                // Task Header (Title + Icons)
+                HStack(alignment: .top) {
+                    Text(task.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .foregroundColor(.primary)
                     
-                    // Outlook-style Flag Button
-                    Button(action: {
-                        store.toggleFlag(for: task.id, inColumnId: columnId)
-                    }) {
-                        Image(systemName: task.isFlagged ? "flag.fill" : "flag")
-                            .font(.system(size: 12))
-                            .foregroundColor(task.isFlagged ? .red : (isHovering ? .secondary : .clear))
-                    }
-                    .buttonStyle(.plain)
-                    .help(task.isFlagged ? "Unflag task" : "Flag task")
-                }
-            }
-            
-            // Task Description Snippet
-            let cleanDescription = task.description.strippingHTML
-            if !cleanDescription.isEmpty {
-                Text(cleanDescription)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
-            
-            // Subtask Progress Bar
-            if !task.subtasks.isEmpty {
-                let completedCount = task.subtasks.filter { $0.isCompleted }.count
-                let totalCount = task.subtasks.count
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("\(completedCount)/\(totalCount) subtasks")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                        
-                        Spacer()
-                        
-                        Text("\(Int(task.completionProgress * 100))%")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
+                    Spacer()
                     
-                    ProgressView(value: task.completionProgress)
-                        .tint(task.completionProgress == 1.0 ? .green : .accentColor)
-                        .scaleEffect(x: 1, y: 0.5, anchor: .center)
-                }
-                .padding(.top, 2)
-            }
-            
-            // Tags & Metadata Row
-            if !task.tags.isEmpty || task.dueDate != nil {
-                HStack(alignment: .center, spacing: 6) {
-                    // Due Date Badge
-                    if let _ = task.dueDate {
-                        HStack(spacing: 3) {
-                            Image(systemName: "clock")
-                                .font(.system(size: 9))
-                            Text(formattedDueDate)
-                                .font(.system(size: 9, weight: .semibold))
+                    HStack(spacing: 6) {
+                        // Show due date indicator if overdue or pending
+                        if task.dueDate != nil {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 11))
+                                .foregroundColor(isOverdue ? .red : .secondary)
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(isOverdue ? Color.red.opacity(0.15) : Color.secondary.opacity(0.15))
-                        .foregroundColor(isOverdue ? .red : .secondary)
-                        .cornerRadius(4)
+                        
+                        // Outlook-style Flag Button
+                        Button(action: {
+                            store.toggleFlag(for: task.id, inColumnId: columnId)
+                        }) {
+                            Image(systemName: task.isFlagged ? "flag.fill" : "flag")
+                                .font(.system(size: 12))
+                                .foregroundColor(task.isFlagged ? .red : (isHovering ? .secondary : .clear))
+                        }
+                        .buttonStyle(.plain)
+                        .help(task.isFlagged ? "Unflag task" : "Flag task")
                     }
+                }
+                
+                // Task Description Snippet
+                let cleanDescription = task.description.strippingHTML
+                if !cleanDescription.isEmpty {
+                    Text(cleanDescription)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                // Subtask Progress Bar
+                if !task.subtasks.isEmpty {
+                    let completedCount = task.subtasks.filter { $0.isCompleted }.count
+                    let totalCount = task.subtasks.count
                     
-                    // Tag badges (limit to 2 tags to avoid overflow)
-                    ForEach(task.tags.prefix(2), id: \.self) { tag in
-                        Text(tag)
-                            .font(.system(size: 9, weight: .medium))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("\(completedCount)/\(totalCount) subtasks")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            Text("\(Int(task.completionProgress * 100))%")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        ProgressView(value: task.completionProgress)
+                            .tint(task.completionProgress == 1.0 ? .green : .accentColor)
+                            .scaleEffect(x: 1, y: 0.5, anchor: .center)
+                    }
+                    .padding(.top, 2)
+                }
+                
+                // Tags & Metadata Row
+                if !task.tags.isEmpty || task.dueDate != nil {
+                    HStack(alignment: .center, spacing: 6) {
+                        // Due Date Badge
+                        if let _ = task.dueDate {
+                            HStack(spacing: 3) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 9))
+                                Text(formattedDueDate)
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(tagColor(tag).opacity(0.15))
-                            .foregroundColor(tagColor(tag))
+                            .background(isOverdue ? Color.red.opacity(0.15) : Color.secondary.opacity(0.15))
+                            .foregroundColor(isOverdue ? .red : .secondary)
                             .cornerRadius(4)
+                        }
+                        
+                        // Tag badges (limit to 2 tags to avoid overflow)
+                        ForEach(task.tags.prefix(2), id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 9, weight: .medium))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(tagColor(tag).opacity(0.15))
+                                .foregroundColor(tagColor(tag))
+                                .cornerRadius(4)
+                        }
+                        
+                        if task.tags.count > 2 {
+                            Text("+\(task.tags.count - 2)")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        }
                     }
-                    
-                    if task.tags.count > 2 {
-                        Text("+\(task.tags.count - 2)")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                    }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
             }
+            .padding(12)
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(NSColor.controlBackgroundColor))
-                .shadow(color: Color.black.opacity(isHovering ? 0.15 : 0.05), radius: isHovering ? 4 : 2, y: 1)
+                .shadow(color: Color.black.opacity(isHovering ? 0.08 : 0.04), radius: isHovering ? 5 : 2.5, x: 0, y: isHovering ? 2.5 : 1.2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isHovering ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+                .stroke(isHovering ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.12), lineWidth: 1)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .scaleEffect(isHovering ? 1.015 : 1.0)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering

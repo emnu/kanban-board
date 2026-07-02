@@ -35,6 +35,11 @@ public class GoogleDriveSync: ObservableObject {
     public static let defaultClientId = "673711859742-5p9du971aqiibaoo34o4ng8emjvkqoqe.apps.googleusercontent.com"
     
     public var redirectUri: String {
+        let parts = clientId.components(separatedBy: ".")
+        if parts.count >= 2 {
+            let reversed = parts.reversed().joined(separator: ".")
+            return "\(reversed):/oauth2redirect"
+        }
         return "com.kanbanapp.oauth:/oauth2redirect"
     }
     
@@ -267,9 +272,9 @@ public class GoogleDriveSync: ObservableObject {
         }
     }
     
-    public func uploadData(_ data: KanbanData, fileId: String?) async -> Bool {
+    public func uploadData(_ data: KanbanData, fileId: String?) async -> String? {
         guard let token = await getValidAccessToken() else {
-            return false
+            return nil
         }
         
         updateStatus(.syncing)
@@ -280,7 +285,7 @@ public class GoogleDriveSync: ObservableObject {
         
         guard let jsonData = try? encoder.encode(data) else {
             updateStatus(.error, error: "JSON encoding error")
-            return false
+            return nil
         }
         
         do {
@@ -297,14 +302,14 @@ public class GoogleDriveSync: ObservableObject {
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                     let err = String(data: resData, encoding: .utf8) ?? "Upload patch error"
                     updateStatus(.error, error: err)
-                    return false
+                    return nil
                 }
                 
                 updateStatus(.synced)
                 DispatchQueue.main.async {
                     self.lastSyncTime = Date()
                 }
-                return true
+                return fileId
             } else {
                 // CREATE new file
                 // We use multipart/related to create with metadata + contents
@@ -337,18 +342,26 @@ public class GoogleDriveSync: ObservableObject {
                 guard let httpResponse = response as? HTTPURLResponse, (httpResponse.statusCode == 200 || httpResponse.statusCode == 201) else {
                     let err = String(data: resData, encoding: .utf8) ?? "Upload post error"
                     updateStatus(.error, error: err)
-                    return false
+                    return nil
                 }
                 
                 updateStatus(.synced)
                 DispatchQueue.main.async {
                     self.lastSyncTime = Date()
                 }
-                return true
+                
+                // Decode Google's response to get the newly created File ID
+                struct DriveCreateResponse: Codable {
+                    let id: String
+                }
+                if let createResponse = try? JSONDecoder().decode(DriveCreateResponse.self, from: resData) {
+                    return createResponse.id
+                }
+                return nil
             }
         } catch {
             updateStatus(.error, error: error.localizedDescription)
-            return false
+            return nil
         }
     }
     

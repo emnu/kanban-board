@@ -24,17 +24,11 @@ public class KanbanStore: ObservableObject {
     }
     
     public init() {
+        self.remoteFileId = UserDefaults.standard.string(forKey: "GoogleDriveSync_RemoteFileId")
         loadLocalData()
         
-        // Listen to Google Drive auth status changes to trigger a sync once logged in
-        GoogleDriveSync.shared.$status
-            .sink { [weak self] status in
-                if status == .offline || status == .synced {
-                    // Trigger sync when sync engine becomes available or logs in
-                    self?.triggerSync()
-                }
-            }
-            .store(in: &cancellables)
+        // Trigger initial sync check on launch
+        triggerSync()
     }
     
     // MARK: - Local Persistence
@@ -122,12 +116,18 @@ public class KanbanStore: ObservableObject {
             if let fileId = fileId {
                 await MainActor.run {
                     self.remoteFileId = fileId
+                    UserDefaults.standard.set(fileId, forKey: "GoogleDriveSync_RemoteFileId")
                 }
             }
             
             guard let remote = remoteData else {
                 // Remote file does not exist on Drive, upload current local state
-                _ = await GoogleDriveSync.shared.uploadData(self.kanbanData, fileId: self.remoteFileId)
+                if let newId = await GoogleDriveSync.shared.uploadData(self.kanbanData, fileId: self.remoteFileId) {
+                    await MainActor.run {
+                        self.remoteFileId = newId
+                        UserDefaults.standard.set(newId, forKey: "GoogleDriveSync_RemoteFileId")
+                    }
+                }
                 return
             }
             
@@ -152,8 +152,15 @@ public class KanbanStore: ObservableObject {
                     }
                 } else if self.kanbanData.lastSavedTimestamp > remote.lastSavedTimestamp {
                     // Local is newer: Push local changes
+                    let currentData = self.kanbanData
+                    let currentFileId = self.remoteFileId
                     _Concurrency.Task {
-                        _ = await GoogleDriveSync.shared.uploadData(self.kanbanData, fileId: self.remoteFileId)
+                        if let newId = await GoogleDriveSync.shared.uploadData(currentData, fileId: currentFileId) {
+                            await MainActor.run {
+                                self.remoteFileId = newId
+                                UserDefaults.standard.set(newId, forKey: "GoogleDriveSync_RemoteFileId")
+                            }
+                        }
                     }
                 } else {
                     // Timestamps are equal, already in sync
@@ -173,6 +180,15 @@ public class KanbanStore: ObservableObject {
         ])
         kanbanData.boards.append(newBoard)
         activeBoard = newBoard
+        dataChanged()
+    }
+    
+    public func renameBoard(_ boardId: UUID, to newName: String) {
+        guard let index = kanbanData.boards.firstIndex(where: { $0.id == boardId }) else { return }
+        kanbanData.boards[index].name = newName
+        if activeBoard?.id == boardId {
+            activeBoard = kanbanData.boards[index]
+        }
         dataChanged()
     }
     

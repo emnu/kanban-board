@@ -105,6 +105,27 @@ struct ColumnView: View {
             }
             .padding(.horizontal, 8)
             
+            // Add Task Button (placed at the top of the column for easy access)
+            Button(action: {
+                showingAddTaskSheet = true
+            }) {
+                HStack {
+                    Image(systemName: "plus")
+                    Text("Add Card")
+                }
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 4)
+            
             // Task List
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 8) {
@@ -130,27 +151,6 @@ struct ColumnView: View {
             } isTargeted: { targeted in
                 isTargeted = targeted
             }
-            
-            // Add Task Button
-            Button(action: {
-                showingAddTaskSheet = true
-            }) {
-                HStack {
-                    Image(systemName: "plus")
-                    Text("Add Card")
-                }
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 4)
         }
         .padding(12)
         .background(

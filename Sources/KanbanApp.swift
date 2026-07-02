@@ -12,7 +12,7 @@ struct KanbanApp: App {
                 .environmentObject(syncEngine)
                 .onOpenURL { url in
                     // Handle deep link callback from Google OAuth redirect
-                    if url.scheme == "com.kanbanapp.oauth" {
+                    if url.scheme == "com.kanbanapp.oauth" || url.scheme?.hasPrefix("com.googleusercontent.apps") == true {
                         _Concurrency.Task {
                             let success = await syncEngine.handleRedirectURL(url)
                             if success {
