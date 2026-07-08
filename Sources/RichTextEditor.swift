@@ -13,33 +13,38 @@ public struct RichTextEditor: NSViewRepresentable {
     }
     
     public func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.drawsBackground = false
-        
-        let contentSize = scrollView.contentSize
-        
-        let textView = EditorTextView(frame: NSRect(x: 0, y: 0, width: contentSize.width, height: contentSize.height))
-        textView.minSize = NSSize(width: 0.0, height: contentSize.height)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = .width
-        
-        textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
+        let scrollView = NSTextView.scrollableTextView()
+        let textView = scrollView.documentView as! NSTextView
         
         textView.isRichText = true
         textView.importsGraphics = true // Enable pasting images
         textView.allowsUndo = true
         textView.isEditable = isEditable
         textView.delegate = context.coordinator
+        
+        // Enable horizontal and vertical scrollbars
+        scrollView.hasHorizontalScroller = true
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        
+        // Allow text view to expand horizontally for wide content
+        textView.isHorizontallyResizable = true
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        
+        // Disable automatic width tracking so text view width can exceed clip view
+        textView.textContainer?.widthTracksTextView = false
+        
+        // Set initial container width to match scroll view viewport
+        let contentWidth = scrollView.contentSize.width
+        textView.textContainer?.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
+        
+        // Premium scroll view styling
+        scrollView.drawsBackground = false
         textView.drawsBackground = false
         textView.textColor = .textColor
-        textView.font = .systemFont(ofSize: 13)
         
-        scrollView.documentView = textView
+        // Font setting
+        textView.font = .systemFont(ofSize: 13)
         
         // Load initial HTML content if not empty
         if !htmlString.isEmpty {
@@ -50,7 +55,21 @@ public struct RichTextEditor: NSViewRepresentable {
     }
     
     public func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? EditorTextView else { return }
+        let textView = nsView.documentView as! NSTextView
+        
+        // Update the text container width to match the scroll view's current viewport width
+        // so that text wraps to the viewport width, but allow horizontal scroll for wider content!
+        let contentWidth = nsView.contentSize.width
+        if textView.textContainer?.containerSize.width != contentWidth {
+            textView.textContainer?.containerSize.width = contentWidth
+        }
+        
+        // Force the text view's frame width to fit the content or viewport
+        let usedWidth = textView.layoutManager?.usedRect(for: textView.textContainer!).width ?? 0
+        let targetWidth = max(contentWidth, usedWidth)
+        if textView.frame.size.width != targetWidth {
+            textView.frame.size.width = targetWidth
+        }
         
         // Update editability dynamically if needed
         if textView.isEditable != isEditable {
@@ -167,13 +186,6 @@ public struct RichTextEditor: NSViewRepresentable {
                     }
                     
                     if let image = image {
-                        // Assign custom resizable cell if not already set
-                        if !(attachment.attachmentCell is ResizableImageAttachmentCell) {
-                            let customCell = ResizableImageAttachmentCell(imageCell: image)
-                            customCell.attachment = attachment
-                            attachment.attachmentCell = customCell
-                        }
-                        
                         let maxWidth: CGFloat = 680
                         let originalSize = image.size
                         let currentWidth = attachment.bounds.width
@@ -196,6 +208,94 @@ public struct RichTextEditor: NSViewRepresentable {
             }
         }
         
+        // MARK: - NSTextViewDelegate Image Attachment Intercepts
+        
+        public func textView(_ textView: NSTextView, clickedOn cell: NSTextAttachmentCellProtocol, in rect: NSRect, at charIndex: Int) {
+            guard let attachment = cell.attachment else { return }
+            var image: NSImage? = nil
+            
+            if let attImage = attachment.image {
+                image = attImage
+            } else if let fileWrapper = attachment.fileWrapper,
+                      let fileData = fileWrapper.regularFileContents {
+                image = NSImage(data: fileData)
+            } else if let contents = attachment.contents {
+                image = NSImage(data: contents)
+            }
+            
+            guard let img = image else { return }
+            
+            let menu = NSMenu(title: "Image Size")
+            
+            let originalItem = NSMenuItem(title: "Original Size (\(Int(img.size.width))px)", action: #selector(resizeToOriginal(_:)), keyEquivalent: "")
+            originalItem.target = self
+            originalItem.representedObject = [attachment, textView]
+            menu.addItem(originalItem)
+            
+            let smallItem = NSMenuItem(title: "Small (200px)", action: #selector(resizeToSmall(_:)), keyEquivalent: "")
+            smallItem.target = self
+            smallItem.representedObject = [attachment, textView]
+            menu.addItem(smallItem)
+            
+            let mediumItem = NSMenuItem(title: "Medium (400px)", action: #selector(resizeToMedium(_:)), keyEquivalent: "")
+            mediumItem.target = self
+            mediumItem.representedObject = [attachment, textView]
+            menu.addItem(mediumItem)
+            
+            let largeItem = NSMenuItem(title: "Large (680px)", action: #selector(resizeToLarge(_:)), keyEquivalent: "")
+            largeItem.target = self
+            largeItem.representedObject = [attachment, textView]
+            menu.addItem(largeItem)
+            
+            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        }
+        
+        @objc func resizeToOriginal(_ sender: NSMenuItem) {
+            resizeAttachment(sender, toWidth: nil)
+        }
+        
+        @objc func resizeToSmall(_ sender: NSMenuItem) {
+            resizeAttachment(sender, toWidth: 200)
+        }
+        
+        @objc func resizeToMedium(_ sender: NSMenuItem) {
+            resizeAttachment(sender, toWidth: 400)
+        }
+        
+        @objc func resizeToLarge(_ sender: NSMenuItem) {
+            resizeAttachment(sender, toWidth: 680)
+        }
+        
+        private func resizeAttachment(_ sender: NSMenuItem, toWidth width: CGFloat?) {
+            guard let info = sender.representedObject as? [Any],
+                  info.count == 2,
+                  let attachment = info[0] as? NSTextAttachment,
+                  let textView = info[1] as? NSTextView else { return }
+            
+            var image: NSImage? = nil
+            if let attImage = attachment.image {
+                image = attImage
+            } else if let fileWrapper = attachment.fileWrapper,
+                      let fileData = fileWrapper.regularFileContents {
+                image = NSImage(data: fileData)
+            } else if let contents = attachment.contents {
+                image = NSImage(data: contents)
+            }
+            
+            guard let img = image else { return }
+            
+            if let targetWidth = width {
+                let ratio = targetWidth / img.size.width
+                attachment.bounds = CGRect(x: 0, y: 0, width: targetWidth, height: img.size.height * ratio)
+            } else {
+                attachment.bounds = CGRect(x: 0, y: 0, width: img.size.width, height: img.size.height)
+            }
+            
+            // Force redraw and report changes to swiftui binding
+            textView.textStorage?.beginEditing()
+            textView.textStorage?.endEditing()
+            textView.didChangeText()
+        }
         
         // MARK: - HTML Generation with Dimension Preservation
         
@@ -289,251 +389,3 @@ public struct RichTextEditor: NSViewRepresentable {
         }
     }
 }
-
-// MARK: - 8 Resize Handles Definition
-enum ResizeHandle {
-    case topLeft
-    case topCenter
-    case topRight
-    case middleLeft
-    case middleRight
-    case bottomLeft
-    case bottomCenter
-    case bottomRight
-    
-    func rect(in cellFrame: NSRect, size: CGFloat) -> NSRect {
-        let x: CGFloat
-        let y: CGFloat
-        
-        switch self {
-        case .topLeft:
-            x = cellFrame.minX - size / 2
-            y = cellFrame.minY - size / 2
-        case .topCenter:
-            x = cellFrame.midX - size / 2
-            y = cellFrame.minY - size / 2
-        case .topRight:
-            x = cellFrame.maxX - size / 2
-            y = cellFrame.minY - size / 2
-        case .middleLeft:
-            x = cellFrame.minX - size / 2
-            y = cellFrame.midY - size / 2
-        case .middleRight:
-            x = cellFrame.maxX - size / 2
-            y = cellFrame.midY - size / 2
-        case .bottomLeft:
-            x = cellFrame.minX - size / 2
-            y = cellFrame.maxY - size / 2
-        case .bottomCenter:
-            x = cellFrame.midX - size / 2
-            y = cellFrame.maxY - size / 2
-        case .bottomRight:
-            x = cellFrame.maxX - size / 2
-            y = cellFrame.maxY - size / 2
-        }
-        
-        return NSRect(x: x, y: y, width: size, height: size)
-    }
-}
-
-// MARK: - EditorTextView Subclass for Handling Intercepts
-class EditorTextView: NSTextView {
-    
-    override func mouseDown(with event: NSEvent) {
-        let point = self.convert(event.locationInWindow, from: nil)
-        
-        // Find if user clicked on an attachment cell frame
-        if let hit = hitTestAttachment(at: point) {
-            let cellFrame = hit.cellFrame
-            let attachment = hit.attachment
-            let handleSize: CGFloat = 8
-            
-            // Check if user clicked on any of the 8 handles
-            let handles: [ResizeHandle] = [
-                .topLeft, .topCenter, .topRight,
-                .middleLeft, .middleRight,
-                .bottomLeft, .bottomCenter, .bottomRight
-            ]
-            
-            var clickedHandle: ResizeHandle? = nil
-            for handle in handles {
-                let handleRect = handle.rect(in: cellFrame, size: handleSize)
-                if handleRect.contains(point) {
-                    clickedHandle = handle
-                    break
-                }
-            }
-            
-            // If they clicked a handle, perform the drag resize loop!
-            if let handle = clickedHandle {
-                performResizeDrag(with: event, for: attachment, cellFrame: cellFrame, handle: handle)
-                return // Prevent default text view behavior (no selection change or drag-and-drop!)
-            }
-        }
-        
-        // Fallback to default NSTextView mouse down
-        super.mouseDown(with: event)
-    }
-    
-    private func hitTestAttachment(at point: NSPoint) -> (attachment: NSTextAttachment, cellFrame: NSRect, charIndex: Int)? {
-        guard let layoutManager = self.layoutManager,
-              let textContainer = self.textContainer,
-              let textStorage = self.textStorage else { return nil }
-        
-        let length = textStorage.length
-        var result: (attachment: NSTextAttachment, cellFrame: NSRect, charIndex: Int)? = nil
-        
-        textStorage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: length), options: []) { value, range, stop in
-            if let attachment = value as? NSTextAttachment {
-                let charIndex = range.location
-                let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
-                let rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
-                let offsetFrame = rect.offsetBy(dx: self.textContainerOrigin.x, dy: self.textContainerOrigin.y)
-                
-                // Allow a slight margin for handles that sit outside the frame
-                let expandedFrame = offsetFrame.insetBy(dx: -8, dy: -8)
-                if expandedFrame.contains(point) {
-                    result = (attachment, offsetFrame, charIndex)
-                    stop.pointee = true
-                }
-            }
-        }
-        return result
-    }
-    
-    private func performResizeDrag(with theEvent: NSEvent, for attachment: NSTextAttachment, cellFrame: NSRect, handle: ResizeHandle) {
-        guard let window = self.window else { return }
-        
-        // Get original image size
-        var image: NSImage? = nil
-        if let attImage = attachment.image {
-            image = attImage
-        } else if let fileWrapper = attachment.fileWrapper,
-                  let fileData = fileWrapper.regularFileContents {
-            image = NSImage(data: fileData)
-        } else if let contents = attachment.contents {
-            image = NSImage(data: contents)
-        }
-        
-        guard let img = image else { return }
-        let originalSize = img.size
-        guard originalSize.width > 0, originalSize.height > 0 else { return }
-        
-        let initialBounds = attachment.bounds
-        let aspectRatio = originalSize.width / originalSize.height
-        
-        var keepTracking = true
-        while keepTracking {
-            guard let nextEvent = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
-            
-            if nextEvent.type == .leftMouseUp {
-                keepTracking = false
-            }
-            
-            let currentPoint = self.convert(nextEvent.locationInWindow, from: nil)
-            
-            var newWidth = initialBounds.width
-            var newHeight = initialBounds.height
-            
-            // Depending on which handle is dragged, recalculate size!
-            switch handle {
-            case .bottomRight:
-                // Dragging bottom-right: changes width and height, maintaining aspect ratio
-                newWidth = currentPoint.x - cellFrame.minX
-                newWidth = max(40, min(680, newWidth))
-                newHeight = newWidth / aspectRatio
-                
-            case .bottomLeft:
-                // Dragging bottom-left: changes width (growing to the left) and height
-                newWidth = cellFrame.maxX - currentPoint.x
-                newWidth = max(40, min(680, newWidth))
-                newHeight = newWidth / aspectRatio
-                
-            case .topRight:
-                // Dragging top-right: changes width and height (growing upwards)
-                newWidth = currentPoint.x - cellFrame.minX
-                newWidth = max(40, min(680, newWidth))
-                newHeight = newWidth / aspectRatio
-                
-            case .topLeft:
-                // Dragging top-left: changes width (growing left) and height (growing up)
-                newWidth = cellFrame.maxX - currentPoint.x
-                newWidth = max(40, min(680, newWidth))
-                newHeight = newWidth / aspectRatio
-                
-            case .middleRight:
-                // Dragging middle-right: adjusts width only (keeps height)
-                newWidth = currentPoint.x - cellFrame.minX
-                newWidth = max(40, min(680, newWidth))
-                
-            case .middleLeft:
-                // Dragging middle-left: adjusts width only (keeps height)
-                newWidth = cellFrame.maxX - currentPoint.x
-                newWidth = max(40, min(680, newWidth))
-                
-            case .bottomCenter:
-                // Dragging bottom-center: adjusts height only (keeps width)
-                newHeight = currentPoint.y - cellFrame.minY
-                newHeight = max(40, newHeight)
-                
-            case .topCenter:
-                // Dragging top-center: adjusts height only (keeps width)
-                newHeight = cellFrame.maxY - currentPoint.y
-                newHeight = max(40, newHeight)
-            }
-            
-            // Apply new bounds
-            attachment.bounds = CGRect(x: 0, y: 0, width: newWidth, height: newHeight)
-            
-            // Invalidate layout and redraw
-            self.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: self.textStorage?.length ?? 0), actualCharacterRange: nil)
-            self.needsDisplay = true
-        }
-        
-        // Notify bindings to serialize to HTML and save
-        self.didChangeText()
-    }
-}
-
-// MARK: - Custom NSCell to draw selection borders and 8 handles
-class ResizableImageAttachmentCell: NSTextAttachmentCell {
-    
-    override init(imageCell image: NSImage?) {
-        super.init(imageCell: image)
-    }
-    
-    required init(coder: NSCoder) {
-        super.init(coder: coder)
-    }
-    
-    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
-        super.draw(withFrame: cellFrame, in: controlView)
-        
-        let handleSize: CGFloat = 8
-        let handles: [ResizeHandle] = [
-            .topLeft, .topCenter, .topRight,
-            .middleLeft, .middleRight,
-            .bottomLeft, .bottomCenter, .bottomRight
-        ]
-        
-        // Draw selection border line around the image
-        NSColor.systemBlue.setStroke()
-        let borderPath = NSBezierPath(rect: cellFrame)
-        borderPath.lineWidth = 1.0
-        borderPath.stroke()
-        
-        // Draw 8 handles
-        for handle in handles {
-            let handleRect = handle.rect(in: cellFrame, size: handleSize)
-            
-            NSColor.white.set()
-            let path = NSBezierPath(rect: handleRect) // Draw square handles!
-            path.fill()
-            
-            NSColor.systemBlue.setStroke()
-            path.lineWidth = 1.5
-            path.stroke()
-        }
-    }
-}
-
