@@ -156,6 +156,13 @@ public struct RichTextEditor: NSViewRepresentable {
                     }
                     
                     if let image = image {
+                        // Assign custom resizable cell if not already set
+                        if !(attachment.attachmentCell is ResizableImageAttachmentCell) {
+                            let customCell = ResizableImageAttachmentCell(imageCell: image)
+                            customCell.attachment = attachment
+                            attachment.attachmentCell = customCell
+                        }
+                        
                         let maxWidth: CGFloat = 680
                         let originalSize = image.size
                         let currentWidth = attachment.bounds.width
@@ -359,3 +366,105 @@ public struct RichTextEditor: NSViewRepresentable {
         }
     }
 }
+
+// MARK: - Resizable NSTextAttachmentCell for Drag-to-Resize Images
+class ResizableImageAttachmentCell: NSTextAttachmentCell {
+    
+    override init(imageCell image: NSImage?) {
+        super.init(imageCell: image)
+    }
+    
+    required init(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+    
+    override func wantsToTrackMouse() -> Bool {
+        return true
+    }
+    
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
+        // Draw the original image attachment first
+        super.draw(withFrame: cellFrame, in: controlView)
+        
+        // Draw the circular grab handle in the bottom-right corner
+        let handleSize: CGFloat = 10
+        let handleRect = NSRect(
+            x: cellFrame.maxX - handleSize - 2,
+            y: cellFrame.maxY - handleSize - 2,
+            width: handleSize,
+            height: handleSize
+        )
+        
+        NSColor.white.set()
+        let path = NSBezierPath(ovalIn: handleRect)
+        path.fill()
+        
+        NSColor.systemBlue.setStroke()
+        path.lineWidth = 2.0
+        path.stroke()
+    }
+    
+    override func trackMouse(with theEvent: NSEvent, in cellFrame: NSRect, of controlView: NSView?, untilMouseUp flag: Bool) -> Bool {
+        guard let view = controlView as? NSTextView,
+              let window = view.window,
+              let attachment = self.attachment else { return false }
+        
+        // Get the active image representation to read original aspect ratio
+        guard let image = self.image ?? attachment.image ?? (attachment.contents != nil ? NSImage(data: attachment.contents!) : nil) else {
+            return false
+        }
+        let originalSize = image.size
+        guard originalSize.width > 0, originalSize.height > 0 else { return false }
+        
+        let startPoint = view.convert(theEvent.locationInWindow, from: nil)
+        
+        // Handle size needs to match the drawing size
+        let handleSize: CGFloat = 10
+        let handleRect = NSRect(
+            x: cellFrame.maxX - handleSize - 2,
+            y: cellFrame.maxY - handleSize - 2,
+            width: handleSize,
+            height: handleSize
+        )
+        
+        // Check if user clicked within the drag handle at the bottom-right corner
+        guard handleRect.contains(startPoint) else {
+            // Otherwise, fallback to standard text view cell mouse behavior
+            return super.trackMouse(with: theEvent, in: cellFrame, of: controlView, untilMouseUp: flag)
+        }
+        
+        // Loop while dragging to dynamically resize
+        var keepTracking = true
+        while keepTracking {
+            guard let nextEvent = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+            
+            if nextEvent.type == .leftMouseUp {
+                keepTracking = false
+            }
+            
+            let currentPoint = view.convert(nextEvent.locationInWindow, from: nil)
+            
+            // Calculate new width relative to the left edge of the cell frame
+            var newWidth = currentPoint.x - cellFrame.origin.x
+            
+            // Enforce minimum width of 40px and maximum editor width of 680px
+            newWidth = max(40, min(680, newWidth))
+            
+            // Maintain exact aspect ratio to prevent squishing
+            let ratio = originalSize.height / originalSize.width
+            let newHeight = newWidth * ratio
+            
+            // Apply new bounds
+            attachment.bounds = CGRect(x: 0, y: 0, width: newWidth, height: newHeight)
+            
+            // Force redraw of layout manager and update bounds
+            view.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: view.textStorage?.length ?? 0), actualCharacterRange: nil)
+            view.needsDisplay = true
+        }
+        
+        // Notify bindings to serialize to HTML and trigger sync
+        view.didChangeText()
+        return true
+    }
+}
+
