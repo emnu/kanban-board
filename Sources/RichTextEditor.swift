@@ -54,19 +54,51 @@ public struct RichTextEditor: NSViewRepresentable {
         return scrollView
     }
     
+    private func getAttachmentWidth(_ attachment: NSTextAttachment) -> CGFloat {
+        if attachment.bounds.width > 0 {
+            return attachment.bounds.width
+        }
+        var image: NSImage? = nil
+        if let attImage = attachment.image {
+            image = attImage
+        } else if let fileWrapper = attachment.fileWrapper,
+                  let fileData = fileWrapper.regularFileContents,
+                  let attImage = NSImage(data: fileData) {
+            image = attImage
+        } else if let attData = attachment.contents,
+                  let attImage = NSImage(data: attData) {
+            image = attImage
+        }
+        return image?.size.width ?? 0
+    }
+    
     public func updateNSView(_ nsView: NSScrollView, context: Context) {
         let textView = nsView.documentView as! NSTextView
-        
-        // Update the text container width to match the scroll view's current viewport width
-        // so that text wraps to the viewport width, but allow horizontal scroll for wider content!
         let contentWidth = nsView.contentSize.width
-        if textView.textContainer?.containerSize.width != contentWidth {
-            textView.textContainer?.containerSize.width = contentWidth
+        
+        // Scan for the widest image attachment in the text storage
+        var maxAttachmentWidth: CGFloat = 0
+        if let textStorage = textView.textStorage {
+            let range = NSRange(location: 0, length: textStorage.length)
+            textStorage.enumerateAttribute(.attachment, in: range, options: []) { (value: Any?, range: NSRange, stop: UnsafeMutablePointer<ObjCBool>) in
+                if let attachment = value as? NSTextAttachment {
+                    let width = self.getAttachmentWidth(attachment)
+                    if width > maxAttachmentWidth {
+                        maxAttachmentWidth = width
+                    }
+                }
+            }
         }
         
-        // Force the text view's frame width to fit the content or viewport
-        let usedWidth = textView.layoutManager?.usedRect(for: textView.textContainer!).width ?? 0
-        let targetWidth = max(contentWidth, usedWidth)
+        // Target width is the maximum of the viewport content width and the widest attachment
+        let targetWidth = max(contentWidth, maxAttachmentWidth)
+        
+        // Update the text container width so that attachments/text can stretch to the targetWidth
+        if textView.textContainer?.containerSize.width != targetWidth {
+            textView.textContainer?.containerSize.width = targetWidth
+        }
+        
+        // Force the text view's frame width to fit the target width, enabling horizontal scroll
         if textView.frame.size.width != targetWidth {
             textView.frame.size.width = targetWidth
         }
@@ -210,92 +242,7 @@ public struct RichTextEditor: NSViewRepresentable {
         
         // MARK: - NSTextViewDelegate Image Attachment Intercepts
         
-        public func textView(_ textView: NSTextView, clickedOn cell: NSTextAttachmentCellProtocol, in rect: NSRect, at charIndex: Int) {
-            guard let attachment = cell.attachment else { return }
-            var image: NSImage? = nil
-            
-            if let attImage = attachment.image {
-                image = attImage
-            } else if let fileWrapper = attachment.fileWrapper,
-                      let fileData = fileWrapper.regularFileContents {
-                image = NSImage(data: fileData)
-            } else if let contents = attachment.contents {
-                image = NSImage(data: contents)
-            }
-            
-            guard let img = image else { return }
-            
-            let menu = NSMenu(title: "Image Size")
-            
-            let originalItem = NSMenuItem(title: "Original Size (\(Int(img.size.width))px)", action: #selector(resizeToOriginal(_:)), keyEquivalent: "")
-            originalItem.target = self
-            originalItem.representedObject = [attachment, textView]
-            menu.addItem(originalItem)
-            
-            let smallItem = NSMenuItem(title: "Small (200px)", action: #selector(resizeToSmall(_:)), keyEquivalent: "")
-            smallItem.target = self
-            smallItem.representedObject = [attachment, textView]
-            menu.addItem(smallItem)
-            
-            let mediumItem = NSMenuItem(title: "Medium (400px)", action: #selector(resizeToMedium(_:)), keyEquivalent: "")
-            mediumItem.target = self
-            mediumItem.representedObject = [attachment, textView]
-            menu.addItem(mediumItem)
-            
-            let largeItem = NSMenuItem(title: "Large (680px)", action: #selector(resizeToLarge(_:)), keyEquivalent: "")
-            largeItem.target = self
-            largeItem.representedObject = [attachment, textView]
-            menu.addItem(largeItem)
-            
-            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-        }
-        
-        @objc func resizeToOriginal(_ sender: NSMenuItem) {
-            resizeAttachment(sender, toWidth: nil)
-        }
-        
-        @objc func resizeToSmall(_ sender: NSMenuItem) {
-            resizeAttachment(sender, toWidth: 200)
-        }
-        
-        @objc func resizeToMedium(_ sender: NSMenuItem) {
-            resizeAttachment(sender, toWidth: 400)
-        }
-        
-        @objc func resizeToLarge(_ sender: NSMenuItem) {
-            resizeAttachment(sender, toWidth: 680)
-        }
-        
-        private func resizeAttachment(_ sender: NSMenuItem, toWidth width: CGFloat?) {
-            guard let info = sender.representedObject as? [Any],
-                  info.count == 2,
-                  let attachment = info[0] as? NSTextAttachment,
-                  let textView = info[1] as? NSTextView else { return }
-            
-            var image: NSImage? = nil
-            if let attImage = attachment.image {
-                image = attImage
-            } else if let fileWrapper = attachment.fileWrapper,
-                      let fileData = fileWrapper.regularFileContents {
-                image = NSImage(data: fileData)
-            } else if let contents = attachment.contents {
-                image = NSImage(data: contents)
-            }
-            
-            guard let img = image else { return }
-            
-            if let targetWidth = width {
-                let ratio = targetWidth / img.size.width
-                attachment.bounds = CGRect(x: 0, y: 0, width: targetWidth, height: img.size.height * ratio)
-            } else {
-                attachment.bounds = CGRect(x: 0, y: 0, width: img.size.width, height: img.size.height)
-            }
-            
-            // Force redraw and report changes to swiftui binding
-            textView.textStorage?.beginEditing()
-            textView.textStorage?.endEditing()
-            textView.didChangeText()
-        }
+        // Removed custom image attachment resizing menu
         
         // MARK: - HTML Generation with Dimension Preservation
         
