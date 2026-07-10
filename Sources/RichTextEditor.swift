@@ -22,21 +22,9 @@ public struct RichTextEditor: NSViewRepresentable {
         textView.isEditable = isEditable
         textView.delegate = context.coordinator
         
-        // Enable horizontal and vertical scrollbars
-        scrollView.hasHorizontalScroller = true
+        // Standard vertical scrolling configurations
         scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        
-        // Allow text view to expand horizontally for wide content
-        textView.isHorizontallyResizable = true
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        
-        // Disable automatic width tracking so text view width can exceed clip view
-        textView.textContainer?.widthTracksTextView = false
-        
-        // Set initial container width to match scroll view viewport
-        let contentWidth = scrollView.contentSize.width
-        textView.textContainer?.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
+        scrollView.hasHorizontalScroller = false
         
         // Premium scroll view styling
         scrollView.drawsBackground = false
@@ -54,54 +42,8 @@ public struct RichTextEditor: NSViewRepresentable {
         return scrollView
     }
     
-    private func getAttachmentWidth(_ attachment: NSTextAttachment) -> CGFloat {
-        if attachment.bounds.width > 0 {
-            return attachment.bounds.width
-        }
-        var image: NSImage? = nil
-        if let attImage = attachment.image {
-            image = attImage
-        } else if let fileWrapper = attachment.fileWrapper,
-                  let fileData = fileWrapper.regularFileContents,
-                  let attImage = NSImage(data: fileData) {
-            image = attImage
-        } else if let attData = attachment.contents,
-                  let attImage = NSImage(data: attData) {
-            image = attImage
-        }
-        return image?.size.width ?? 0
-    }
-    
     public func updateNSView(_ nsView: NSScrollView, context: Context) {
         let textView = nsView.documentView as! NSTextView
-        let contentWidth = nsView.contentSize.width
-        
-        // Scan for the widest image attachment in the text storage
-        var maxAttachmentWidth: CGFloat = 0
-        if let textStorage = textView.textStorage {
-            let range = NSRange(location: 0, length: textStorage.length)
-            textStorage.enumerateAttribute(.attachment, in: range, options: []) { (value: Any?, range: NSRange, stop: UnsafeMutablePointer<ObjCBool>) in
-                if let attachment = value as? NSTextAttachment {
-                    let width = self.getAttachmentWidth(attachment)
-                    if width > maxAttachmentWidth {
-                        maxAttachmentWidth = width
-                    }
-                }
-            }
-        }
-        
-        // Target width is the maximum of the viewport content width and the widest attachment
-        let targetWidth = max(contentWidth, maxAttachmentWidth)
-        
-        // Update the text container width so that attachments/text can stretch to the targetWidth
-        if textView.textContainer?.containerSize.width != targetWidth {
-            textView.textContainer?.containerSize.width = targetWidth
-        }
-        
-        // Force the text view's frame width to fit the target width, enabling horizontal scroll
-        if textView.frame.size.width != targetWidth {
-            textView.frame.size.width = targetWidth
-        }
         
         // Update editability dynamically if needed
         if textView.isEditable != isEditable {
@@ -174,7 +116,7 @@ public struct RichTextEditor: NSViewRepresentable {
         public func textDidChange(_ notification: Notification) {
             guard !isSettingText, let textView = notification.object as? NSTextView else { return }
             if let textStorage = textView.textStorage {
-                scaleAttachmentsToFit(textStorage)
+                scaleAttachmentsToFit(textStorage, in: textView)
             }
             let html = getHTML(from: textView)
             DispatchQueue.main.async {
@@ -196,14 +138,19 @@ public struct RichTextEditor: NSViewRepresentable {
             
             if let attributed = try? NSAttributedString(data: data, options: options, documentAttributes: nil) {
                 let mutable = NSMutableAttributedString(attributedString: attributed)
-                scaleAttachmentsToFit(mutable)
+                scaleAttachmentsToFit(mutable, in: textView)
                 textView.textStorage?.setAttributedString(mutable)
                 textView.font = .systemFont(ofSize: 13) // Reset to standard system font
             }
         }
         
-        private func scaleAttachmentsToFit(_ attrStr: NSAttributedString) {
+        private func scaleAttachmentsToFit(_ attrStr: NSAttributedString, in textView: NSTextView) {
             guard let mutable = attrStr as? NSMutableAttributedString else { return }
+            
+            // Determine maximum width based on visible scroll view content size
+            let contentWidth = textView.enclosingScrollView?.contentSize.width ?? 600
+            let maxWidth = max(200, contentWidth - 24) // 24px safety margin for text container insets
+            
             mutable.enumerateAttribute(.attachment, in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
                 if let attachment = value as? NSTextAttachment {
                     var image: NSImage? = nil
@@ -218,20 +165,11 @@ public struct RichTextEditor: NSViewRepresentable {
                     }
                     
                     if let image = image {
-                        let maxWidth: CGFloat = 680
                         let originalSize = image.size
                         let currentWidth = attachment.bounds.width
                         
-                        if currentWidth == 0 {
-                            // First time loading: scale if it exceeds maxWidth
-                            if originalSize.width > maxWidth {
-                                let ratio = maxWidth / originalSize.width
-                                attachment.bounds = CGRect(x: 0, y: 0, width: maxWidth, height: originalSize.height * ratio)
-                            } else {
-                                attachment.bounds = CGRect(x: 0, y: 0, width: originalSize.width, height: originalSize.height)
-                            }
-                        } else if currentWidth > maxWidth {
-                            // Scale down if it exceeds the maximum editor width
+                        // Force the image to fit exactly within the viewport width
+                        if currentWidth == 0 || currentWidth > maxWidth || originalSize.width > maxWidth {
                             let ratio = maxWidth / originalSize.width
                             attachment.bounds = CGRect(x: 0, y: 0, width: maxWidth, height: originalSize.height * ratio)
                         }
