@@ -12,13 +12,21 @@ struct MainView: View {
     @State private var boardToRename: Board? = nil
     @State private var renameBoardNameInput = ""
     
+    // Notes sheets and states
+    @State private var showingAddNoteAlert = false
+    @State private var newNoteTitle = ""
+    @State private var showingRenameNoteSheet = false
+    @State private var noteToRename: Note? = nil
+    @State private var renameNoteTitleInput = ""
+    
     var body: some View {
         NavigationSplitView {
-            // Sidebar: List of Boards
-            List(selection: $store.activeBoard) {
+            // Sidebar: Partitioned list of Boards and Notes
+            List(selection: $store.sidebarSelection) {
+                // Section 1: Kanban Boards
                 Section {
                     ForEach(store.kanbanData.boards) { board in
-                        NavigationLink(value: board) {
+                        NavigationLink(value: SidebarSelection.board(board.id)) {
                             Label(board.name, systemImage: "folder")
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
@@ -64,6 +72,54 @@ struct MainView: View {
                         .help("Create New Board")
                     }
                 }
+                
+                // Section 2: Notes
+                Section {
+                    ForEach(store.kanbanData.notes) { note in
+                        NavigationLink(value: SidebarSelection.note(note.id)) {
+                            Label(note.title, systemImage: "note.text")
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        store.deleteNote(note.id)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                        }
+                        .contextMenu {
+                            Button {
+                                noteToRename = note
+                                renameNoteTitleInput = note.title
+                                showingRenameNoteSheet = true
+                            } label: {
+                                Label("Rename Note", systemImage: "pencil")
+                            }
+                            
+                            Divider()
+                            
+                            Button(role: .destructive) {
+                                store.deleteNote(note.id)
+                            } label: {
+                                Label("Delete Note", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("My Notes")
+                        Spacer()
+                        Button(action: {
+                            newNoteTitle = ""
+                            showingAddNoteAlert = true
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Create New Note")
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 // Sidebar Footer: Sync Status and Settings
@@ -94,12 +150,24 @@ struct MainView: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
         } detail: {
-            // Detail Area: Active Board Workspace
-            if let activeBoard = store.activeBoard {
-                BoardView(board: activeBoard, searchText: searchText)
-                    .navigationTitle(activeBoard.name)
-            } else {
-                ContentUnavailableView("Select or Create a Board", systemImage: "tray", description: Text("Choose a board from the sidebar to get started."))
+            // Workspace Detail Router
+            switch store.sidebarSelection {
+            case .board(let boardId):
+                if let board = store.kanbanData.boards.first(where: { $0.id == boardId }) {
+                    BoardView(board: board, searchText: searchText)
+                        .navigationTitle(board.name)
+                } else {
+                    ContentUnavailableView("Select or Create a Board", systemImage: "folder", description: Text("Choose a board from the sidebar to get started."))
+                }
+            case .note(let noteId):
+                if let note = store.kanbanData.notes.first(where: { $0.id == noteId }) {
+                    NoteEditorView(noteId: noteId)
+                        .navigationTitle(note.title)
+                } else {
+                    ContentUnavailableView("Select or Create a Note", systemImage: "note.text", description: Text("Choose a note from the sidebar to get started."))
+                }
+            case .none:
+                ContentUnavailableView("Welcome", systemImage: "square.grid.2x2", description: Text("Select a board or note from the sidebar to begin."))
             }
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search cards by title, tag, or desc...")
@@ -200,6 +268,76 @@ struct MainView: View {
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(renameBoardNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding()
+            .frame(width: 300)
+        }
+        .sheet(isPresented: $showingAddNoteAlert) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("New Note")
+                    .font(.headline)
+                
+                TextField("Note Title", text: $newNoteTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        if !newNoteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            store.addNote(title: newNoteTitle)
+                            showingAddNoteAlert = false
+                        }
+                    }
+                
+                HStack {
+                    Spacer()
+                    Button("Cancel") {
+                        showingAddNoteAlert = false
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    
+                    Button("Create") {
+                        if !newNoteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            store.addNote(title: newNoteTitle)
+                            showingAddNoteAlert = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newNoteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding()
+            .frame(width: 300)
+        }
+        .sheet(isPresented: $showingRenameNoteSheet) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Rename Note")
+                    .font(.headline)
+                
+                TextField("Note Title", text: $renameNoteTitleInput)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        if let note = noteToRename, !renameNoteTitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            store.renameNote(note.id, to: renameNoteTitleInput)
+                            showingRenameNoteSheet = false
+                        }
+                    }
+                
+                HStack {
+                    Spacer()
+                    Button("Cancel") {
+                        showingRenameNoteSheet = false
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    
+                    Button("Save") {
+                        if let note = noteToRename, !renameNoteTitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            store.renameNote(note.id, to: renameNoteTitleInput)
+                            showingRenameNoteSheet = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(renameNoteTitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .padding()

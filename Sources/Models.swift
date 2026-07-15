@@ -113,15 +113,48 @@ public struct Board: Identifiable, Codable, Hashable {
     }
 }
 
+public struct Note: Identifiable, Codable, Hashable {
+    public let id: UUID
+    public var title: String
+    public var content: String // Rich HTML text
+    public var createdAt: Date
+    public var updatedAt: Date
+    
+    public init(id: UUID = UUID(), title: String, content: String = "", createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct KanbanData: Codable {
     public var activeBoardId: UUID?
     public var boards: [Board]
+    public var notes: [Note]
     public var lastSavedTimestamp: Double
 
-    public init(activeBoardId: UUID? = nil, boards: [Board] = [], lastSavedTimestamp: Double = Date().timeIntervalSince1970) {
+    public init(activeBoardId: UUID? = nil, boards: [Board] = [], notes: [Note] = [], lastSavedTimestamp: Double = Date().timeIntervalSince1970) {
         self.activeBoardId = activeBoardId
         self.boards = boards
+        self.notes = notes
         self.lastSavedTimestamp = lastSavedTimestamp
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case activeBoardId
+        case boards
+        case notes
+        case lastSavedTimestamp
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.activeBoardId = try container.decodeIfPresent(UUID.self, forKey: .activeBoardId)
+        self.boards = try container.decode([Board].self, forKey: .boards)
+        self.notes = try container.decodeIfPresent([Note].self, forKey: .notes) ?? []
+        self.lastSavedTimestamp = try container.decode(Double.self, forKey: .lastSavedTimestamp)
     }
     
     public static var previewData: KanbanData {

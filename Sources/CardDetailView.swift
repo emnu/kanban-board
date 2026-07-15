@@ -7,6 +7,7 @@ struct CardDetailView: View {
     var columnId: UUID
     var task: Task? // If nil, we are creating a new task
     
+    @State private var taskId = UUID()
     @State private var title = ""
     @State private var description = ""
     @State private var tags: [String] = []
@@ -227,21 +228,19 @@ struct CardDetailView: View {
             .navigationTitle(isEditing ? "Edit Card" : "New Card")
             .onAppear(perform: loadTaskDetails)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveTask()
+                    Button("Close") {
                         dismiss()
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .onChange(of: title) { _ in autosave() }
+            .onChange(of: description) { _ in autosave() }
+            .onChange(of: tags) { _ in autosave() }
+            .onChange(of: subtasks) { _ in autosave() }
+            .onChange(of: hasDueDate) { _ in autosave() }
+            .onChange(of: dueDate) { _ in autosave() }
         }
         .frame(width: 950, height: 700)
     }
@@ -266,6 +265,7 @@ struct CardDetailView: View {
     
     private func loadTaskDetails() {
         if let task = task {
+            taskId = task.id
             title = task.title
             description = task.description
             tags = task.tags
@@ -282,7 +282,7 @@ struct CardDetailView: View {
     
     private func saveTask() {
         let currentTask = Task(
-            id: task?.id ?? UUID(),
+            id: taskId,
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             tags: tags,
@@ -292,6 +292,12 @@ struct CardDetailView: View {
             updatedAt: Date()
         )
         store.saveTask(currentTask, toColumnId: columnId)
+    }
+    
+    private func autosave() {
+        // Only autosave if the title is not empty, to avoid creating blank cards
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        saveTask()
     }
 }
 

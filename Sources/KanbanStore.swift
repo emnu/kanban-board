@@ -1,10 +1,16 @@
 import Foundation
 import Combine
 
+public enum SidebarSelection: Hashable {
+    case board(UUID)
+    case note(UUID)
+}
+
 public class KanbanStore: ObservableObject {
     @Published public var kanbanData: KanbanData = KanbanData()
     @Published public var activeBoard: Board? = nil
     @Published public var sortFlaggedToTop: Bool = false
+    @Published public var sidebarSelection: SidebarSelection? = nil
     
     private var remoteFileId: String? = nil
     private var cancellables = Set<AnyCancellable>()
@@ -27,6 +33,28 @@ public class KanbanStore: ObservableObject {
         self.remoteFileId = UserDefaults.standard.string(forKey: "GoogleDriveSync_RemoteFileId")
         loadLocalData()
         
+        // Keep activeBoard and activeBoardId in sync with sidebarSelection
+        $sidebarSelection
+            .sink { [weak self] selection in
+                guard let self = self else { return }
+                switch selection {
+                case .board(let boardId):
+                    let foundBoard = self.kanbanData.boards.first(where: { $0.id == boardId })
+                    if self.activeBoard?.id != foundBoard?.id {
+                        self.activeBoard = foundBoard
+                    }
+                    if self.kanbanData.activeBoardId != boardId {
+                        self.kanbanData.activeBoardId = boardId
+                        self.saveLocalData()
+                    }
+                case .note, .none:
+                    if self.activeBoard != nil {
+                        self.activeBoard = nil
+                    }
+                }
+            }
+            .store(in: &cancellables)
+            
         // Trigger initial sync check on launch
         triggerSync()
     }
@@ -43,13 +71,19 @@ public class KanbanStore: ObservableObject {
                 let decoded = try decoder.decode(KanbanData.self, from: data)
                 self.kanbanData = decoded
                 
-                // Set active board
+                // Set active board and initial sidebar selection
                 if let activeId = decoded.activeBoardId {
                     self.activeBoard = decoded.boards.first(where: { $0.id == activeId })
+                    if let board = self.activeBoard {
+                        self.sidebarSelection = .board(board.id)
+                    }
                 }
                 
                 if self.activeBoard == nil {
                     self.activeBoard = decoded.boards.first
+                    if let board = self.activeBoard {
+                        self.sidebarSelection = .board(board.id)
+                    }
                 }
             } catch {
                 print("Error loading local data: \(error)")
@@ -63,6 +97,9 @@ public class KanbanStore: ObservableObject {
     private func loadPreviewData() {
         self.kanbanData = KanbanData.previewData
         self.activeBoard = self.kanbanData.boards.first(where: { $0.id == self.kanbanData.activeBoardId })
+        if let board = self.activeBoard {
+            self.sidebarSelection = .board(board.id)
+        }
         saveLocalData()
     }
     
@@ -180,6 +217,7 @@ public class KanbanStore: ObservableObject {
         ])
         kanbanData.boards.append(newBoard)
         activeBoard = newBoard
+        sidebarSelection = .board(newBoard.id)
         dataChanged()
     }
     
@@ -196,7 +234,13 @@ public class KanbanStore: ObservableObject {
         guard kanbanData.boards.count > 1 else { return } // Keep at least one board
         kanbanData.boards.removeAll(where: { $0.id == board.id })
         if activeBoard?.id == board.id {
-            activeBoard = kanbanData.boards.first
+            let nextBoard = kanbanData.boards.first
+            activeBoard = nextBoard
+            if let nextId = nextBoard?.id {
+                sidebarSelection = .board(nextId)
+            } else {
+                sidebarSelection = nil
+            }
         }
         dataChanged()
     }
@@ -310,5 +354,43 @@ public class KanbanStore: ObservableObject {
             activeBoard = board
             dataChanged()
         }
+    }
+    
+    // MARK: - Notes Management
+    
+    public func addNote(title: String) {
+        let newNote = Note(title: title)
+        kanbanData.notes.append(newNote)
+        sidebarSelection = .note(newNote.id)
+        dataChanged()
+    }
+    
+    public func deleteNote(_ noteId: UUID) {
+        kanbanData.notes.removeAll(where: { $0.id == noteId })
+        if case .note(let selectedId) = sidebarSelection, selectedId == noteId {
+            if let firstBoard = kanbanData.boards.first {
+                sidebarSelection = .board(firstBoard.id)
+            } else if let firstNote = kanbanData.notes.first {
+                sidebarSelection = .note(firstNote.id)
+            } else {
+                sidebarSelection = nil
+            }
+        }
+        dataChanged()
+    }
+    
+    public func updateNote(id: UUID, title: String, content: String) {
+        guard let index = kanbanData.notes.firstIndex(where: { $0.id == id }) else { return }
+        kanbanData.notes[index].title = title
+        kanbanData.notes[index].content = content
+        kanbanData.notes[index].updatedAt = Date()
+        dataChanged()
+    }
+    
+    public func renameNote(_ noteId: UUID, to newTitle: String) {
+        guard let index = kanbanData.notes.firstIndex(where: { $0.id == noteId }) else { return }
+        kanbanData.notes[index].title = newTitle
+        kanbanData.notes[index].updatedAt = Date()
+        dataChanged()
     }
 }
